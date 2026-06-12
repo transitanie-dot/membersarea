@@ -35,6 +35,24 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 
+function validatePassword(password) {
+  const value = String(password || '');
+
+  if (value.length < 8) {
+    return 'Password must be at least 8 characters long.';
+  }
+
+  if (!/[A-Za-z]/.test(value)) {
+    return 'Password must contain at least one letter.';
+  }
+
+  if (!/[0-9]/.test(value)) {
+    return 'Password must contain at least one number.';
+  }
+
+  return null;
+}
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
@@ -55,6 +73,14 @@ app.post('/register', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Name, email and password are required.'
+      });
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({
+        success: false,
+        message: passwordError
       });
     }
 
