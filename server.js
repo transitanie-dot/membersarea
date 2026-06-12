@@ -19,8 +19,24 @@ const supabasePublic = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-app.use(cors());
-app.options('*', cors());
+const allowedOrigins = [
+  'https://www.airportlink.app',
+  'https://airportlink.app',
+  'https://www-airportlink-app.filesusr.com'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 app.get('/', (req, res) => {
@@ -51,9 +67,7 @@ app.post('/register', async (req, res) => {
         email: normalizedEmail,
         password: safePassword,
         email_confirm: true,
-        user_metadata: {
-          full_name: fullName
-        }
+        user_metadata: { full_name: fullName }
       });
 
     if (createUserError || !createdUserData?.user) {
@@ -82,14 +96,35 @@ app.post('/register', async (req, res) => {
       });
     }
 
+    const { data: signInData, error: signInError } =
+      await supabasePublic.auth.signInWithPassword({
+        email: normalizedEmail,
+        password: safePassword
+      });
+
+    if (signInError || !signInData?.session) {
+      return res.status(200).json({
+        success: true,
+        message: 'Account created, but automatic login failed.',
+        autoLogin: false,
+        user: {
+          id: userId,
+          name: fullName,
+          email: normalizedEmail
+        }
+      });
+    }
+
     return res.json({
       success: true,
-      message: 'Account created successfully.',
+      message: 'Account created and login successful.',
+      autoLogin: true,
       user: {
-        id: userId,
+        id: signInData.user.id,
         name: fullName,
         email: normalizedEmail
-      }
+      },
+      session: signInData.session
     });
   } catch (err) {
     return res.status(500).json({
@@ -111,10 +146,11 @@ app.post('/login', async (req, res) => {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+    const safePassword = String(password);
 
     const { data, error } = await supabasePublic.auth.signInWithPassword({
       email: normalizedEmail,
-      password: String(password)
+      password: safePassword
     });
 
     if (error || !data?.user) {
