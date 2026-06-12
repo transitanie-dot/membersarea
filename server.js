@@ -38,18 +38,9 @@ const corsOptions = {
 function validatePassword(password) {
   const value = String(password || '');
 
-  if (value.length < 8) {
-    return 'Password must be at least 8 characters long.';
-  }
-
-  if (!/[A-Za-z]/.test(value)) {
-    return 'Password must contain at least one letter.';
-  }
-
-  if (!/[0-9]/.test(value)) {
-    return 'Password must contain at least one number.';
-  }
-
+  if (value.length < 8) return 'Password must be at least 8 characters long.';
+  if (!/[A-Za-z]/.test(value)) return 'Password must contain at least one letter.';
+  if (!/[0-9]/.test(value)) return 'Password must contain at least one number.';
   return null;
 }
 
@@ -70,74 +61,54 @@ app.post('/register', async (req, res) => {
     const { name, email, password } = req.body || {};
 
     if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name, email and password are required.'
-      });
+      return res.status(400).json({ success: false, message: 'Name, email and password are required.' });
     }
 
     const passwordError = validatePassword(password);
     if (passwordError) {
-      return res.status(400).json({
-        success: false,
-        message: passwordError
-      });
+      return res.status(400).json({ success: false, message: passwordError });
     }
 
     const fullName = String(name).trim();
     const normalizedEmail = String(email).trim().toLowerCase();
     const safePassword = String(password);
 
-    const { data: createdUserData, error: createUserError } =
-      await supabaseAdmin.auth.admin.createUser({
-        email: normalizedEmail,
-        password: safePassword,
-        email_confirm: true,
-        user_metadata: { full_name: fullName }
-      });
+    const { data: createdUserData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+      email: normalizedEmail,
+      password: safePassword,
+      email_confirm: true,
+      user_metadata: { full_name: fullName }
+    });
 
     if (createUserError || !createdUserData?.user) {
-      return res.status(400).json({
-        success: false,
-        message: createUserError?.message || 'Could not create account.'
-      });
+      return res.status(400).json({ success: false, message: createUserError?.message || 'Could not create account.' });
     }
 
     const userId = createdUserData.user.id;
 
-    const { error: insertContactError } = await supabaseAdmin
-      .from('contacts')
-      .insert([
-        {
-          id: userId,
-          full_name: fullName,
-          email: normalizedEmail
-        }
-      ]);
+    const { error: insertContactError } = await supabaseAdmin.from('contacts').insert([
+      {
+        id: userId,
+        full_name: fullName,
+        email: normalizedEmail
+      }
+    ]);
 
     if (insertContactError) {
-      return res.status(400).json({
-        success: false,
-        message: insertContactError.message
-      });
+      return res.status(400).json({ success: false, message: insertContactError.message });
     }
 
-    const { data: signInData, error: signInError } =
-      await supabasePublic.auth.signInWithPassword({
-        email: normalizedEmail,
-        password: safePassword
-      });
+    const { data: signInData, error: signInError } = await supabasePublic.auth.signInWithPassword({
+      email: normalizedEmail,
+      password: safePassword
+    });
 
     if (signInError || !signInData?.session) {
       return res.status(200).json({
         success: true,
         message: 'Account created, but automatic login failed.',
         autoLogin: false,
-        user: {
-          id: userId,
-          name: fullName,
-          email: normalizedEmail
-        }
+        user: { id: userId, name: fullName, email: normalizedEmail }
       });
     }
 
@@ -145,18 +116,11 @@ app.post('/register', async (req, res) => {
       success: true,
       message: 'Account created and login successful.',
       autoLogin: true,
-      user: {
-        id: signInData.user.id,
-        name: fullName,
-        email: normalizedEmail
-      },
+      user: { id: signInData.user.id, name: fullName, email: normalizedEmail },
       session: signInData.session
     });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Server error.'
-    });
+    return res.status(500).json({ success: false, message: err.message || 'Server error.' });
   }
 });
 
@@ -165,10 +129,7 @@ app.post('/login', async (req, res) => {
     const { email, password } = req.body || {};
 
     if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and password are required.'
-      });
+      return res.status(400).json({ success: false, message: 'Email and password are required.' });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
@@ -180,10 +141,7 @@ app.post('/login', async (req, res) => {
     });
 
     if (error || !data?.user) {
-      return res.status(401).json({
-        success: false,
-        message: error?.message || 'Invalid email or password.'
-      });
+      return res.status(401).json({ success: false, message: error?.message || 'Invalid email or password.' });
     }
 
     const { data: contact } = await supabaseAdmin
@@ -203,13 +161,10 @@ app.post('/login', async (req, res) => {
       session: data.session
     });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Server error.'
-    });
+    return res.status(500).json({ success: false, message: err.message || 'Server error.' });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on ${PORT}`);
 });
