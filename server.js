@@ -26,7 +26,7 @@ const allowedOrigins = [
 ];
 
 const corsOptions = {
-  origin: function (origin, callback) {
+  origin(origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
@@ -37,7 +37,6 @@ const corsOptions = {
 
 function validatePassword(password) {
   const value = String(password || '');
-
   if (value.length < 8) return 'Password must be at least 8 characters long.';
   if (!/[A-Za-z]/.test(value)) return 'Password must contain at least one letter.';
   if (!/[0-9]/.test(value)) return 'Password must contain at least one number.';
@@ -48,18 +47,12 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-app.get('/', (req, res) => {
-  res.json({ success: true, message: 'AirportLink API is running.' });
-});
-
-app.get('/health', (req, res) => {
-  res.json({ success: true, message: 'Healthy' });
-});
+app.get('/', (req, res) => res.json({ success: true, message: 'AirportLink API is running.' }));
+app.get('/health', (req, res) => res.json({ success: true, message: 'Healthy' }));
 
 app.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body || {};
-
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: 'Name, email and password are required.' });
     }
@@ -81,12 +74,15 @@ app.post('/register', async (req, res) => {
     });
 
     if (createUserError || !createdUserData?.user) {
-      return res.status(400).json({ success: false, message: createUserError?.message || 'Could not create account.' });
+      return res.status(400).json({
+        success: false,
+        message: createUserError?.message || 'Could not create account.'
+      });
     }
 
     const userId = createdUserData.user.id;
 
-    const { error: insertContactError } = await supabaseAdmin.from('contacts').insert([
+    const { error: contactError } = await supabaseAdmin.from('contacts').upsert([
       {
         id: userId,
         full_name: fullName,
@@ -94,30 +90,15 @@ app.post('/register', async (req, res) => {
       }
     ]);
 
-    if (insertContactError) {
-      return res.status(400).json({ success: false, message: insertContactError.message });
-    }
-
-    const { data: signInData, error: signInError } = await supabasePublic.auth.signInWithPassword({
-      email: normalizedEmail,
-      password: safePassword
-    });
-
-    if (signInError || !signInData?.session) {
-      return res.status(200).json({
-        success: true,
-        message: 'Account created, but automatic login failed.',
-        autoLogin: false,
-        user: { id: userId, name: fullName, email: normalizedEmail }
-      });
+    if (contactError) {
+      return res.status(400).json({ success: false, message: contactError.message });
     }
 
     return res.json({
       success: true,
-      message: 'Account created and login successful.',
-      autoLogin: true,
-      user: { id: signInData.user.id, name: fullName, email: normalizedEmail },
-      session: signInData.session
+      message: 'Account created successfully.',
+      autoLogin: false,
+      user: { id: userId, name: fullName, email: normalizedEmail }
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message || 'Server error.' });
@@ -127,7 +108,6 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email and password are required.' });
     }
