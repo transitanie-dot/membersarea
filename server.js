@@ -5,17 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-if (!process.env.SUPABASE_URL) {
-  throw new Error('SUPABASE_URL is required');
-}
-
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');
-}
-
-if (!process.env.SUPABASE_ANON_KEY) {
-  throw new Error('SUPABASE_ANON_KEY is required');
-}
+if (!process.env.SUPABASE_URL) throw new Error('SUPABASE_URL is required');
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');
+if (!process.env.SUPABASE_ANON_KEY) throw new Error('SUPABASE_ANON_KEY is required');
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -27,42 +19,16 @@ const supabasePublic = createClient(
   process.env.SUPABASE_ANON_KEY
 );
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5500',
-  'http://127.0.0.1:5501',
-  'https://airportlink.app',
-  'https://www.airportlink.app'
-];
-
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.use(cors());
+app.options('*', cors());
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'AirportLink API is running.'
-  });
+  res.json({ success: true, message: 'AirportLink API is running.' });
 });
 
 app.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Healthy'
-  });
+  res.json({ success: true, message: 'Healthy' });
 });
 
 app.post('/register', async (req, res) => {
@@ -145,11 +111,10 @@ app.post('/login', async (req, res) => {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const safePassword = String(password);
 
     const { data, error } = await supabasePublic.auth.signInWithPassword({
       email: normalizedEmail,
-      password: safePassword
+      password: String(password)
     });
 
     if (error || !data?.user) {
@@ -181,20 +146,6 @@ app.post('/login', async (req, res) => {
       message: err.message || 'Server error.'
     });
   }
-});
-
-app.use((err, req, res, next) => {
-  if (err.message && err.message.startsWith('Not allowed by CORS')) {
-    return res.status(403).json({
-      success: false,
-      message: err.message
-    });
-  }
-
-  return res.status(500).json({
-    success: false,
-    message: 'Unexpected server error.'
-  });
 });
 
 app.listen(PORT, () => {
