@@ -43,18 +43,37 @@ function validatePassword(password) {
   return null;
 }
 
+async function linkPurchasesToUser(email, userId) {
+  const { error } = await supabaseAdmin
+    .from('bookings')
+    .update({ user_id: userId })
+    .eq('email', email)
+    .is('user_id', null);
+
+  if (error) throw error;
+}
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-app.get('/', (req, res) => res.json({ success: true, message: 'AirportLink API is running.' }));
-app.get('/health', (req, res) => res.json({ success: true, message: 'Healthy' }));
+app.get('/', (req, res) => {
+  res.json({ success: true, message: 'AirportLink API is running.' });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ success: true, message: 'Healthy' });
+});
 
 app.post('/register', async (req, res) => {
   try {
     const { name, email, password } = req.body || {};
+
     if (!name || !email || !password) {
-      return res.status(400).json({ success: false, message: 'Name, email and password are required.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and password are required.'
+      });
     }
 
     const passwordError = validatePassword(password);
@@ -91,7 +110,19 @@ app.post('/register', async (req, res) => {
     ]);
 
     if (contactError) {
-      return res.status(400).json({ success: false, message: contactError.message });
+      return res.status(400).json({
+        success: false,
+        message: contactError.message
+      });
+    }
+
+    try {
+      await linkPurchasesToUser(normalizedEmail, userId);
+    } catch (linkError) {
+      return res.status(400).json({
+        success: false,
+        message: linkError.message || 'Account created, but could not link purchases.'
+      });
     }
 
     return res.json({
@@ -101,15 +132,22 @@ app.post('/register', async (req, res) => {
       user: { id: userId, name: fullName, email: normalizedEmail }
     });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message || 'Server error.' });
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Server error.'
+    });
   }
 });
 
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
+
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password are required.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required.'
+      });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
@@ -121,7 +159,10 @@ app.post('/login', async (req, res) => {
     });
 
     if (error || !data?.user) {
-      return res.status(401).json({ success: false, message: error?.message || 'Invalid email or password.' });
+      return res.status(401).json({
+        success: false,
+        message: error?.message || 'Invalid email or password.'
+      });
     }
 
     const { data: contact } = await supabaseAdmin
@@ -141,7 +182,10 @@ app.post('/login', async (req, res) => {
       session: data.session
     });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message || 'Server error.' });
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Server error.'
+    });
   }
 });
 
