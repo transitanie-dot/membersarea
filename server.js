@@ -1,192 +1,130 @@
 import express from 'express';
 import cors from 'cors';
+import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is required');
 if (!process.env.SUPABASE_URL) throw new Error('SUPABASE_URL is required');
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');
-if (!process.env.SUPABASE_ANON_KEY) throw new Error('SUPABASE_ANON_KEY is required');
+if (!process.env.STRIPE_WEBHOOK_SECRET) throw new Error('STRIPE_WEBHOOK_SECRET is required');
 
-const supabaseAdmin = createClient(
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const supabasePublic = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
-const allowedOrigins = [
-  'https://www.airportlink.app',
-  'https://airportlink.app',
-  'https://www-airportlink-app.filesusr.com'
-];
-
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
-  },
+app.use(cors({
+  origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
+  allowedHeaders: ['Content-Type', 'Stripe-Signature']
+}));
 
-function validatePassword(password) {
-  const value = String(password || '');
-  if (value.length < 8) return 'Password must be at least 8 characters long.';
-  if (!/[A-Za-z]/.test(value)) return 'Password must contain at least one letter.';
-  if (!/[0-9]/.test(value)) return 'Password must contain at least one number.';
-  return null;
-}
-
-async function linkPurchasesToUser(email, userId) {
-  const { error } = await supabaseAdmin
-    .from('bookings')
-    .update({ user_id: userId })
-    .eq('email', email)
-    .is('user_id', null);
-
-  if (error) throw error;
-}
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.use('/api/stripe-webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.json({ success: true, message: 'AirportLink API is running.' });
+  res.send('Backend is running');
 });
 
-app.get('/health', (req, res) => {
-  res.json({ success: true, message: 'Healthy' });
-});
+app.post('/api/create-checkout-session', async (req, res) => {
+  const { amount, currency, booking } = req.body;
 
-app.post('/register', async (req, res) => {
-  try {
-    const { name, email, password } = req.body || {};
-
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name, email and password are required.'
-      });
-    }
-
-    const passwordError = validatePassword(password);
-    if (passwordError) {
-      return res.status(400).json({ success: false, message: passwordError });
-    }
-
-    const fullName = String(name).trim();
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const safePassword = String(password);
-
-    const { data: createdUserData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
-      email: normalizedEmail,
-      password: safePassword,
-      email_confirm: true,
-      user_metadata: { full_name: fullName }
-    });
-
-    if (createUserError || !createdUserData?.user) {
-      return res.status(400).json({
-        success: false,
-        message: createUserError?.message || 'Could not create account.'
-      });
-    }
-
-    const userId = createdUserData.user.id;
-
-    const { error: contactError } = await supabaseAdmin.from('contacts').upsert([
-      {
-        id: userId,
-        full_name: fullName,
-        email: normalizedEmail
-      }
-    ]);
-
-    if (contactError) {
-      return res.status(400).json({
-        success: false,
-        message: contactError.message
-      });
-    }
-
-    try {
-      await linkPurchasesToUser(normalizedEmail, userId);
-    } catch (linkError) {
-      return res.status(400).json({
-        success: false,
-        message: linkError.message || 'Account created, but could not link purchases.'
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: 'Account created successfully.',
-      autoLogin: false,
-      user: { id: userId, name: fullName, email: normalizedEmail }
-    });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Server error.'
-    });
+  if (!amount || !currency || !booking) {
+    return res.status(400).json({ error: 'Missing amount, currency or booking' });
   }
-});
 
-app.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body || {};
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and password are required.'
-      });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const safePassword = String(password);
-
-    const { data, error } = await supabasePublic.auth.signInWithPassword({
-      email: normalizedEmail,
-      password: safePassword
-    });
-
-    if (error || !data?.user) {
-      return res.status(401).json({
-        success: false,
-        message: error?.message || 'Invalid email or password.'
-      });
-    }
-
-    const { data: contact } = await supabaseAdmin
-      .from('contacts')
-      .select('id, full_name, email')
-      .eq('id', data.user.id)
-      .maybeSingle();
-
-    return res.json({
-      success: true,
-      message: 'Login successful.',
-      user: {
-        id: data.user.id,
-        name: contact?.full_name || data.user.user_metadata?.full_name || '',
-        email: data.user.email
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'payment',
+      line_items: [
+        {
+          price_data: {
+            currency: currency.toLowerCase(),
+            product_data: {
+              name: `Transfer: ${booking.pickup} to ${booking.dropoff}`,
+              description: `${booking.passengers} passengers, ${booking.distance_km ?? booking.distance ?? ''} km, ${booking.duration_minutes ?? booking.duration ?? ''} min`
+            },
+            unit_amount: amount
+          },
+          quantity: 1
+        }
+      ],
+      success_url: 'https://www.airportlink.app/success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: 'https://www.theepictours.com/calculator?cancel=true',
+      customer_email: booking.email,
+      metadata: {
+        email: booking.email || '',
+        full_name: booking.full_name || booking.fullName || '',
+        pickup: booking.pickup || '',
+        dropoff: booking.dropoff || '',
+        booking_date: booking.booking_date || booking.date || '',
+        passengers: String(booking.passengers || ''),
+        price: String(booking.price || amount || ''),
+        distance_km: String(booking.distance_km || booking.distance || ''),
+        duration_minutes: String(booking.duration_minutes || booking.duration || ''),
+        status: 'paid'
       },
-      session: data.session
+      payment_intent_data: {
+        metadata: {
+          email: booking.email || '',
+          pickup: booking.pickup || '',
+          dropoff: booking.dropoff || ''
+        }
+      }
     });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Server error.'
-    });
+
+    res.json({ sessionId: session.id });
+  } catch (error) {
+    console.error('Stripe error:', error);
+    res.status(500).json({ error: error.message });
   }
+});
+
+app.post('/api/stripe-webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const md = session.metadata || {};
+
+    const bookingRow = {
+      user_id: null,
+      pickup: md.pickup || null,
+      dropoff: md.dropoff || null,
+      booking_date: md.booking_date || null,
+      passengers: md.passengers ? parseInt(md.passengers, 10) : null,
+      price: md.price ? Number(md.price) : null,
+      distance_km: md.distance_km ? Number(md.distance_km) : null,
+      duration_minutes: md.duration_minutes ? parseInt(md.duration_minutes, 10) : null,
+      status: md.status || 'paid',
+      stripe_checkout_session_id: session.id,
+      stripe_payment_intent_id: session.payment_intent || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      email: md.email || null
+    };
+
+    const { error } = await supabase.from('bookings').insert(bookingRow);
+
+    if (error) {
+      console.error('Supabase insert error:', error);
+      return res.status(500).send(`Supabase error: ${error.message}`);
+    }
+  }
+
+  res.json({ received: true });
 });
 
 app.listen(PORT, () => {
