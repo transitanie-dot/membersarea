@@ -55,7 +55,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
         }
       ],
       success_url: 'https://www.airportlink.app/success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: 'https://www.theepictours.com/calculator?cancel=true',
+      cancel_url: 'https://www.airportlink.app/failedpayment?cancel=true',
       customer_email: booking.email,
       metadata: {
         email: booking.email || '',
