@@ -114,6 +114,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
         price: String(booking.price || amount || ''),
         distance_km: String(booking.distance_km || booking.distance || ''),
         duration_minutes: String(booking.duration_minutes || booking.duration || ''),
+        notes: booking.notes || '',
+        phone: booking.phone || '',
         status: 'paid'
       },
       payment_intent_data: {
@@ -141,7 +143,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
 
   let event;
   try {
-    event = await stripe.webhooks.constructEventAsync(
+    event = stripe.webhooks.constructEvent(
       req.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
@@ -160,7 +162,6 @@ app.post('/api/stripe-webhook', async (req, res) => {
       null;
 
     const bookingRow = {
-      user_id: null,
       pickup: md.pickup || null,
       dropoff: md.dropoff || null,
       booking_date: md.booking_date || null,
@@ -173,10 +174,15 @@ app.post('/api/stripe-webhook', async (req, res) => {
       stripe_payment_intent_id: session.payment_intent || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      email
+      email,
+      full_name: md.full_name || null,
+      phone: md.phone || null,
+      notes: md.notes || null
     };
 
-    const { error } = await supabase.from('bookings').insert(bookingRow);
+    const { error } = await supabase
+      .from('bookings')
+      .upsert(bookingRow, { onConflict: 'stripe_checkout_session_id' });
 
     if (error) {
       console.error('Supabase insert error:', error);
@@ -212,7 +218,6 @@ app.post('/api/confirm-payment', async (req, res) => {
       null;
 
     const payload = {
-      user_id: metadata.user_id || null,
       pickup: metadata.pickup || null,
       dropoff: metadata.dropoff || null,
       booking_date: metadata.booking_date || null,
@@ -228,7 +233,10 @@ app.post('/api/confirm-payment', async (req, res) => {
           : null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      email
+      email,
+      full_name: metadata.full_name || null,
+      phone: metadata.phone || null,
+      notes: metadata.notes || null
     };
 
     const { error } = await supabase
