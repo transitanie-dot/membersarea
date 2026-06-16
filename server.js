@@ -1,7 +1,7 @@
-iimport express from 'express';
-import cors from 'cors';
-import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+const express = require('express');
+const cors = require('cors');
+const Stripe = require('stripe');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -91,7 +91,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
       line_items: [
         {
           price_data: {
-            currency: currency.toLowerCase(),
+            currency: String(currency).toLowerCase(),
             product_data: {
               name: `Transfer: ${booking.pickup} to ${booking.dropoff}`,
               description: `${booking.passengers} passengers, ${booking.distance_km ?? booking.distance ?? ''} km, ${booking.duration_minutes ?? booking.duration ?? ''} min`
@@ -125,10 +125,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
       }
     });
 
-    res.json({ sessionId: session.id });
+    return res.json({ sessionId: session.id });
   } catch (error) {
     console.error('Stripe error:', error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -141,7 +141,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
 
   let event;
   try {
-    event = await stripe.webhooks.constructEventAsync(
+    event = stripe.webhooks.constructEvent(
       req.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
@@ -156,7 +156,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
     const email =
       md.email ||
       session.customer_email ||
-      session.customer_details?.email ||
+      (session.customer_details && session.customer_details.email) ||
       null;
 
     const bookingRow = {
@@ -184,7 +184,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
     }
   }
 
-  res.json({ received: true });
+  return res.json({ received: true });
 });
 
 app.post('/api/confirm-payment', async (req, res) => {
@@ -208,7 +208,7 @@ app.post('/api/confirm-payment', async (req, res) => {
     const email =
       metadata.email ||
       session.customer_email ||
-      session.customer_details?.email ||
+      (session.customer_details && session.customer_details.email) ||
       null;
 
     const payload = {
