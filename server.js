@@ -33,46 +33,6 @@ app.get('/', (req, res) => {
   res.send('Backend is running');
 });
 
-app.post('/createaccount', async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing name, email or password'
-      });
-    }
-
-    const { data, error } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: name
-      }
-    });
-
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.message
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Account created successfully',
-      user: data.user
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Could not create account'
-    });
-  }
-});
-
 app.post('/api/create-checkout-session', async (req, res) => {
   const { amount, currency, booking } = req.body;
 
@@ -94,7 +54,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
             currency: String(currency).toLowerCase(),
             product_data: {
               name: `Transfer: ${booking.pickup} to ${booking.dropoff}`,
-              description: `${booking.passengers} passengers, ${booking.distance_km ?? booking.distance ?? ''} km, ${booking.duration_minutes ?? booking.duration ?? ''} min`
+              description: `${booking.passengers} passengers`
             },
             unit_amount: amount
           },
@@ -114,16 +74,9 @@ app.post('/api/create-checkout-session', async (req, res) => {
         price: String(booking.price || amount || ''),
         distance_km: String(booking.distance_km || booking.distance || ''),
         duration_minutes: String(booking.duration_minutes || booking.duration || ''),
-        notes: booking.notes || '',
         phone: booking.phone || '',
+        notes: booking.notes || '',
         status: 'paid'
-      },
-      payment_intent_data: {
-        metadata: {
-          email: booking.email || '',
-          pickup: booking.pickup || '',
-          dropoff: booking.dropoff || ''
-        }
       }
     });
 
@@ -155,6 +108,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const md = session.metadata || {};
+
     const email =
       md.email ||
       session.customer_email ||
@@ -210,33 +164,30 @@ app.post('/api/confirm-payment', async (req, res) => {
       });
     }
 
-    const metadata = session.metadata || {};
+    const md = session.metadata || {};
     const email =
-      metadata.email ||
+      md.email ||
       session.customer_email ||
       session.customer_details?.email ||
       null;
 
     const payload = {
-      pickup: metadata.pickup || null,
-      dropoff: metadata.dropoff || null,
-      booking_date: metadata.booking_date || null,
-      passengers: Number(metadata.passengers || 1),
-      price: cleanNumber(metadata.price),
-      distance_km: cleanNumber(metadata.distance_km),
-      duration_minutes: cleanInt(metadata.duration_minutes),
-      status: metadata.status || 'paid',
+      pickup: md.pickup || null,
+      dropoff: md.dropoff || null,
+      booking_date: md.booking_date || null,
+      passengers: md.passengers ? parseInt(md.passengers, 10) : 1,
+      price: cleanNumber(md.price),
+      distance_km: cleanNumber(md.distance_km),
+      duration_minutes: cleanInt(md.duration_minutes),
+      status: md.status || 'paid',
       stripe_checkout_session_id: session.id,
-      stripe_payment_intent_id:
-        typeof session.payment_intent === 'string'
-          ? session.payment_intent
-          : null,
+      stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       email,
-      full_name: metadata.full_name || null,
-      phone: metadata.phone || null,
-      notes: metadata.notes || null
+      full_name: md.full_name || null,
+      phone: md.phone || null,
+      notes: md.notes || null
     };
 
     const { error } = await supabase
