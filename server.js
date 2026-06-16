@@ -11,7 +11,10 @@ if (!process.env.SUPABASE_URL) throw new Error('SUPABASE_URL is required');
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');
 if (!process.env.STRIPE_WEBHOOK_SECRET) throw new Error('STRIPE_WEBHOOK_SECRET is required');
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2024-06-20',
+});
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -28,6 +31,46 @@ app.use(express.json());
 
 app.get('/', (req, res) => {
   res.send('Backend is running');
+});
+
+app.post('/createaccount', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing name, email or password'
+      });
+    }
+
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: name
+      }
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Account created successfully',
+      user: data.user
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Could not create account'
+    });
+  }
 });
 
 app.post('/api/create-checkout-session', async (req, res) => {
@@ -126,6 +169,74 @@ app.post('/api/stripe-webhook', async (req, res) => {
 
   res.json({ received: true });
 });
+
+app.post('/api/confirm-payment', async (req, res) => {
+  try {
+    const { session_id } = req.body;
+
+    if (!session_id || !session_id.startsWith('cs_')) {
+      return res.status(400).json({ error: 'Invalid session_id' });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    if (session.payment_status !== 'paid') {
+      return res.status(200).json({
+        payment_status: session.payment_status,
+        booking_saved: false,
+      });
+    }
+
+    const metadata = session.metadata || {};
+
+    const payload = {
+      user_id: metadata.user_id || null,
+      pickup: metadata.pickup || null,
+      dropoff: metadata.dropoff || null,
+      booking_date: metadata.booking_date || null,
+      passengers: Number(metadata.passengers || 1),
+      price: cleanNumber(metadata.price),
+      distance_km: cleanNumber(metadata.distance_km),
+      duration_minutes: cleanInt(metadata.duration_minutes),
+      status: metadata.status || 'paid',
+      stripe_checkout_session_id: session.id,
+      stripe_payment_intent_id:
+        typeof session.payment_intent === 'string'
+          ? session.payment_intent
+          : null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('bookings')
+      .upsert(payload, { onConflict: 'stripe_checkout_session_id' });
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.status(200).json({
+      payment_status: session.payment_status,
+      booking_saved: true,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error?.message || 'Failed to confirm payment',
+    });
+  }
+});
+
+function cleanNumber(value) {
+  if (!value) return null;
+  const match = String(value).replace(',', '.').match(/[\d.]+/);
+  return match ? Number(match[0]) : null;
+}
+
+function cleanInt(value) {
+  const n = cleanNumber(value);
+  return n === null ? null : Math.trunc(n);
+}
 
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
