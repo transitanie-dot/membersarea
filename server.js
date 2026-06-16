@@ -1,4 +1,4 @@
-import express from 'express';
+iimport express from 'express';
 import cors from 'cors';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
@@ -80,6 +80,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
     return res.status(400).json({ error: 'Missing amount, currency or booking' });
   }
 
+  if (!booking.email || !String(booking.email).trim()) {
+    return res.status(400).json({ error: 'Missing booking.email' });
+  }
+
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -131,9 +135,17 @@ app.post('/api/create-checkout-session', async (req, res) => {
 app.post('/api/stripe-webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
 
+  if (!sig) {
+    return res.status(400).send('Missing Stripe signature');
+  }
+
   let event;
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = await stripe.webhooks.constructEventAsync(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
   } catch (err) {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
@@ -141,6 +153,11 @@ app.post('/api/stripe-webhook', async (req, res) => {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const md = session.metadata || {};
+    const email =
+      md.email ||
+      session.customer_email ||
+      session.customer_details?.email ||
+      null;
 
     const bookingRow = {
       user_id: null,
@@ -156,7 +173,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
       stripe_payment_intent_id: session.payment_intent || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      email: md.email || null
+      email
     };
 
     const { error } = await supabase.from('bookings').insert(bookingRow);
@@ -188,6 +205,11 @@ app.post('/api/confirm-payment', async (req, res) => {
     }
 
     const metadata = session.metadata || {};
+    const email =
+      metadata.email ||
+      session.customer_email ||
+      session.customer_details?.email ||
+      null;
 
     const payload = {
       user_id: metadata.user_id || null,
@@ -206,6 +228,7 @@ app.post('/api/confirm-payment', async (req, res) => {
           : null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      email
     };
 
     const { error } = await supabase
