@@ -1,7 +1,7 @@
-const express = require('express');
-const cors = require('cors');
-const Stripe = require('stripe');
-const { createClient } = require('@supabase/supabase-js');
+import express from 'express';
+import cors from 'cors';
+import Stripe from 'stripe';
+import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -141,7 +141,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
 
   let event;
   try {
-    event = stripe.webhooks.constructEvent(
+    event = await stripe.webhooks.constructEventAsync(
       req.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
@@ -156,7 +156,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
     const email =
       md.email ||
       session.customer_email ||
-      (session.customer_details && session.customer_details.email) ||
+      session.customer_details?.email ||
       null;
 
     const bookingRow = {
@@ -208,7 +208,7 @@ app.post('/api/confirm-payment', async (req, res) => {
     const email =
       metadata.email ||
       session.customer_email ||
-      (session.customer_details && session.customer_details.email) ||
+      session.customer_details?.email ||
       null;
 
     const payload = {
