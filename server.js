@@ -1,11 +1,16 @@
-import express from 'express';
-import cors from 'cors';
-import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+import express from "express";
+import cors from "cors";
+import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Variáveis de ambiente
 if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is required');
 if (!process.env.SUPABASE_URL) throw new Error('SUPABASE_URL is required');
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');
@@ -20,19 +25,26 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// CORS
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Stripe-Signature']
 }));
 
+// Serve arquivos estáticos da pasta public/
+app.use(express.static('public'));
+
+// Webhook do Stripe (precisa de raw body)
 app.use('/api/stripe-webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
+// Health check
 app.get('/', (req, res) => {
   res.send('Backend is running');
 });
 
+// Create checkout session
 app.post('/api/create-checkout-session', async (req, res) => {
   const { amount, currency, booking } = req.body;
 
@@ -87,6 +99,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
+// Webhook do Stripe
 app.post('/api/stripe-webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
 
@@ -109,11 +122,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
     const session = event.data.object;
     const md = session.metadata || {};
 
-    const email =
-      md.email ||
-      session.customer_email ||
-      session.customer_details?.email ||
-      null;
+    const email = md.email || session.customer_email || session.customer_details?.email || null;
 
     const bookingRow = {
       pickup: md.pickup || null,
@@ -134,9 +143,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
       notes: md.notes || null
     };
 
-    const { error } = await supabase
-      .from('bookings')
-      .upsert(bookingRow, { onConflict: 'stripe_checkout_session_id' });
+    const { error } = await supabase.from('bookings').upsert(bookingRow, { onConflict: 'stripe_checkout_session_id' });
 
     if (error) {
       console.error('Supabase insert error:', error);
@@ -147,6 +154,7 @@ app.post('/api/stripe-webhook', async (req, res) => {
   return res.json({ received: true });
 });
 
+// Confirm payment
 app.post('/api/confirm-payment', async (req, res) => {
   try {
     const { session_id } = req.body;
@@ -165,11 +173,7 @@ app.post('/api/confirm-payment', async (req, res) => {
     }
 
     const md = session.metadata || {};
-    const email =
-      md.email ||
-      session.customer_email ||
-      session.customer_details?.email ||
-      null;
+    const email = md.email || session.customer_email || session.customer_details?.email || null;
 
     const payload = {
       pickup: md.pickup || null,
@@ -190,9 +194,7 @@ app.post('/api/confirm-payment', async (req, res) => {
       notes: md.notes || null
     };
 
-    const { error } = await supabase
-      .from('bookings')
-      .upsert(payload, { onConflict: 'stripe_checkout_session_id' });
+    const { error } = await supabase.from('bookings').upsert(payload, { onConflict: 'stripe_checkout_session_id' });
 
     if (error) {
       return res.status(500).json({ error: error.message });
@@ -209,6 +211,7 @@ app.post('/api/confirm-payment', async (req, res) => {
   }
 });
 
+// Helper functions
 function cleanNumber(value) {
   if (!value) return null;
   const match = String(value).replace(',', '.').match(/[\d.]+/);
@@ -220,6 +223,7 @@ function cleanInt(value) {
   return n === null ? null : Math.trunc(n);
 }
 
+// Start server
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
 });
